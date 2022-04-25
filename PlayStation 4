@@ -1,0 +1,105 @@
+# IMPORTAR DATA -----
+
+directorio <- "D:/Cursos/Ciencia_Datos/Proyecto/Data/"
+data <- file.path(directorio, "SEE_BaseDeDatos.xlsx")
+
+data_original <- read.xlsx(xlsxFile = data, sheet = "Base_Facturacion")
+
+data_ventas <- data_original %>%
+  mutate( Total = str_replace(Total, pattern = ",", replacement = ".") ) %>% 
+  mutate( Fecha_facturacion = as.Date(Fecha_facturacion, origin="1899-12-30")) %>% 
+  mutate( Total = as.double(Total)) %>% #revisar no cambia a double
+  filter( Total > 0) %>% 
+  mutate( Tipo = trimws(Tipo))
+
+analysis_date <- lubridate::as_date('2021-10-01')
+df_RFM <- data_ventas %>% 
+  group_by(Tipo) %>% 
+  summarise(recency=as.numeric(analysis_date-max(Fecha_facturacion)),
+            frequency =n_distinct(Factura),
+            monetary= sum(Total))
+
+# UI ----------------------------------------------------------------------
+
+ui <- fluidPage(
+  # Application title
+  titlePanel("Analisis RFM"),
+  
+  sidebarLayout(
+    
+    sidebarPanel = sidebarPanel(
+      numericInput(inputId = "selectorMontoMin", 
+                   label = "Seleccione el monto minimo", 
+                   value = df_RFM$monetary %>% min(), 
+                   min = df_RFM$monetary %>% min(),
+                   max = df_RFM$monetary %>% max()),
+      
+      numericInput(inputId = "selectorMontoMax", 
+                   label = "Seleccione el monto maximo", 
+                   value = df_RFM$monetary %>% max(), 
+                   min = df_RFM$monetary %>% min(),
+                   max = df_RFM$monetary %>% max()),
+      
+      selectInput(inputId = "selectorContinente", 
+                  label = "Seleccione un continente", 
+                  choices = gapminder %>% pull(continent) %>% unique(), 
+                  selected = "Americas", 
+      ),
+      uiOutput(outputId = "selectorPais_out",
+      ),
+    ),
+    mainPanel = mainPanel(
+      h2(textOutput("titulo_grafica")),
+      br(),
+      plotOutput(outputId = "grafico"),
+      hr(),
+      h2("Información sobre los productos"),
+      br(),
+      DTOutput(outputId = "data_productos")
+    )
+  )
+)
+
+# Server ------------------------------------------------------------------
+
+server <- function(input, output, session) {
+  
+  df_filtrado <- reactive({
+    
+    valormin  <- input$selectorMontoMin
+    valormax <- input$selectorMontoMax
+    df1 <- df_RFM %>% filter( monetary <= valormax, monetary>valormin)
+    
+  })
+  
+  output$grafico <- renderPlot({
+    
+  source("prueba.R")
+    nextWord <- df(max = input$selectorMontoMax,min = input$selectorMontoMin, plotData=TRUE)
+   
+    nextWord %>%
+      ggplot(aes(x = segmentRFM, fill = segmentRFM)) + geom_bar() +
+      labs(title = "Segmentacion de clientes",
+           x = "Segmento",
+           y = "Total Clientes") +coord_flip() + theme_minimal() + theme(legend.position='none')
+
+    # df_filtrado() %>%
+    #   ggplot(aes(x = monetary, y = frequency, color = recency, size = monetary))+
+    #   geom_point()+
+    #   labs(x = "PIB per capita", y = "Esperanza de vida", color = "País")+
+    #   scale_x_log10(labels = dollar)+
+    #   theme(legend.position = "bottom")
+
+  })
+  
+  output$data_productos <- renderDT({
+    
+    df_filtrado() %>% 
+      datatable(options = list(scrollX=T))
+    
+  })
+  
+  
+}
+
+shinyApp(ui, server)
